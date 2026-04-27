@@ -121,11 +121,11 @@ class ChatSession {
     for (const msg of this.history) {
       historyLength += msg.content.length;
     }
-    
+
     // 1. Token estimation with 1.2x safety multiplier
     const historyTokens = Math.ceil((historyLength / 4) * 1.2);
     const systemPromptTokens = Math.ceil(((this.finalSystemPrompt?.length ?? 0) / 4) * 1.2);
-    
+
     // 3. System prompt inclusion safety buffer
     const RESPONSE_BUFFER = 8192;
     const effectiveLimit = 150_000 - systemPromptTokens - RESPONSE_BUFFER;
@@ -142,7 +142,7 @@ class ChatSession {
       Math.floor(this.history.length * 0.6),
       this.history.length - (MAX_MESSAGES - 1)
     );
-    
+
     if (messagesToCompress < 2) return;
 
     const toCompress = this.history.slice(0, messagesToCompress);
@@ -168,10 +168,11 @@ class ChatSession {
       this.budget.record(response.usage.inputTokens, response.usage.outputTokens);
 
       this.history = [
-        { role: 'assistant', content: `[CONTEXT SUMMARY OF PREVIOUS TURNS]\n${response.text}` },
+        { role: 'user', content: `[CONTEXT SUMMARY OF PREVIOUS TURNS]\n${response.text}` },
+        { role: 'assistant', content: 'Acknowledged. I have the compressed context and will continue from here.' },
         ...toKeep
       ];
-      
+
       appendEntry('Context Compression', `Summarized ${messagesToCompress} turns to prevent context overflow.`, this.options.dryRun);
     } catch (err: any) {
       this.ui.warn(`\n${c.red}Summarization failed (${err.message}). Falling back to hard truncation.${c.reset}`);
