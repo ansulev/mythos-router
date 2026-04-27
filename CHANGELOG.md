@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] — 2026-04-27
+
+### Added
+- **Session persistence & resume support**: Sessions are now atomically saved to `~/.mythos-router/sessions/latest.json` on exit. `mythos chat --resume` restores conversation history and budget state.
+- **Context window guard**: Automatically compresses the oldest portion of conversation history when approaching token limits using a low-effort summarization step. Prevents context overflow crashes during long sessions.
+
+### Fixed
+- **CLI signal handling**: Improved handling of `SIGINT`, `SIGTERM`, and `uncaughtException`, ensuring terminal state is restored and sessions are safely persisted on exit or crash.
+- **Commander.js lifecycle**: Switched to `program.parseAsync()` to properly handle async command execution and prevent unhandled promise issues.
+- **Startup race condition**: Removed a dynamic import in the default help path that could cause banner inconsistencies in some environments.
+
+---
+
 ## [1.3.1] — 2026-04-27
 
 ### Added
@@ -172,6 +185,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Correction Turns**: max 2 retries before yielding to human.
 - **Dream/Verify Commands**: memory compression and drift detection.
 
+[1.4.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.4.0
 [1.3.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.3.1
 [1.3.0]: https://github.com/thewaltero/mythos-router/releases/tag/v1.3.0
 [1.2.1]: https://github.com/thewaltero/mythos-router/releases/tag/v1.2.1
