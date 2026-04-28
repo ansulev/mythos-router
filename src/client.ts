@@ -18,6 +18,8 @@ import {
   validateApiKey,
   getOpenAIKey,
   getDeepSeekKey,
+  MAX_OUTPUT_TOKENS_STREAM,
+  MAX_OUTPUT_TOKENS_SEND,
   type EffortLevel,
 } from './config.js';
 import { c } from './utils.js';
@@ -116,18 +118,18 @@ function toMythosResponse(unified: UnifiedResponse): MythosResponse {
   };
 }
 
-// ── Streaming Message (backward-compatible API) ──────────────
 export async function streamMessage(
   messages: { role: 'user' | 'assistant'; content: string }[],
   effort: EffortLevel = 'high',
   onThinkingDelta?: (text: string) => void,
   onTextDelta?: (text: string) => void,
+  maxTokensOverride?: number,
 ): Promise<MythosResponse> {
   const orchestrator = getOrchestrator();
 
   const unified = await orchestrator.streamMessage(messages, {
     systemPrompt: CAPYBARA_SYSTEM_PROMPT,
-    maxTokens: 16384,
+    maxTokens: maxTokensOverride ?? MAX_OUTPUT_TOKENS_STREAM,
     effort,
     onThinkingDelta,
     onTextDelta,
@@ -136,17 +138,17 @@ export async function streamMessage(
   return toMythosResponse(unified);
 }
 
-// ── Non-streaming Message (backward-compatible API) ──────────
 export async function sendMessage(
   messages: { role: 'user' | 'assistant'; content: string }[],
   effort: EffortLevel = 'low',
   systemOverride?: string,
+  maxTokensOverride?: number,
 ): Promise<MythosResponse> {
   const orchestrator = getOrchestrator();
 
   const unified = await orchestrator.sendMessage(messages, {
     systemPrompt: systemOverride ?? CAPYBARA_SYSTEM_PROMPT,
-    maxTokens: 8192,
+    maxTokens: maxTokensOverride ?? MAX_OUTPUT_TOKENS_SEND,
     effort,
   });
 
