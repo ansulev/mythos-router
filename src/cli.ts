@@ -9,10 +9,22 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { chatCommand } from './commands/chat.js';
+
+// ── Suppress Node.js experimental warnings (SQLite) ─────────
+// These leak into terminal output and break polished CLI feel.
+const originalEmit = process.emit.bind(process);
+// @ts-ignore — intentional override to filter warnings
+process.emit = function (event: string, ...args: unknown[]) {
+  if (event === 'warning' && (args[0] as { name?: string })?.name === 'ExperimentalWarning') {
+    return false;
+  }
+  return originalEmit(event, ...args);
+};
 import { verifyCommand } from './commands/verify.js';
 import { dreamCommand } from './commands/dream.js';
 import { statsCommand } from './commands/stats.js';
 import { providersCommand } from './commands/providers.js';
+import { initCommand } from './commands/init.js';
 import {
   DEFAULT_MAX_TOKENS_PER_SESSION,
   DEFAULT_MAX_TURNS,
@@ -132,6 +144,13 @@ program
   .option('-w, --watch', 'Auto-refresh the dashboard when metrics change')
   .option('--verbose', 'Show full error stacks for recent failures')
   .action(providersCommand);
+
+// ── mythos init ──────────────────────────────────────────────
+program
+  .command('init')
+  .description('Initialize mythos-router in the current project')
+  .option('-f, --force', 'Re-scaffold files even if they already exist')
+  .action(initCommand);
 
 // ── Default: show help ───────────────────────────────────────
 if (process.argv.length <= 2) {
