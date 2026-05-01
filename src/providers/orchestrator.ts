@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { TelemetryStore } from './telemetry.js';
+import { TelemetryStore, type ProviderState as TelemetryProviderState } from './telemetry.js';
 import {
   type BaseProvider,
   type Message,
@@ -113,14 +113,22 @@ export class ProviderOrchestrator {
   private slots: ProviderSlot[] = [];
   private eventLog: OrchestrationEvent[] = [];
   private sessionId: string;
-  private telemetry: TelemetryStore;
+  private telemetry: Pick<TelemetryStore, 'updateMetrics' | 'logDecision' | 'logFailure'>;
 
   constructor() {
     this.sessionId = createHash('sha256')
       .update(`${Date.now()}-${Math.random()}`)
       .digest('hex')
       .slice(0, 12);
-    this.telemetry = TelemetryStore.getInstance();
+    try {
+      this.telemetry = TelemetryStore.getInstance();
+    } catch {
+      this.telemetry = {
+        updateMetrics: () => {},
+        logDecision: () => {},
+        logFailure: () => {}
+      };
+    }
   }
 
   // ── Provider Registration ────────────────────────────────
@@ -154,6 +162,7 @@ export class ProviderOrchestrator {
 
   // ── Provider Selection (Scored or Deterministic) ─────────
   private selectProvider(
+    messages: Message[],
     options: StreamOptions | SendOptions,
     requiredCapabilities?: ProviderCapability[],
   ): ProviderSlot[] {
@@ -195,9 +204,18 @@ export class ProviderOrchestrator {
       throw new Error('No providers available. All registered providers are down or disabled.');
     }
 
+    // Explicit force provider
+    if (options.forceProvider) {
+      const forced = eligible.find(s => s.provider.id === options.forceProvider);
+      if (!forced) {
+        throw new Error(`Forced provider '${options.forceProvider}' is not available or disabled.`);
+      }
+      return [forced];
+    }
+
     // Deterministic mode: fixed selection via hash
     if (options.deterministic) {
-      return eligible; // Return all, but deterministicSelect will pick one
+      return [deterministicSelect(messages, eligible)];
     }
 
     // Adaptive mode: sort by score (highest first)
@@ -306,7 +324,6 @@ export class ProviderOrchestrator {
     }
 
     // Trip circuit breaker after exhausting retries
-    this.recordFailure(slot, lastErr!);
     this.tripCircuitBreaker(slot);
     throw lastErr!;
   }
@@ -347,7 +364,10 @@ export class ProviderOrchestrator {
     messages: Message[],
     options: StreamOptions,
   ): Promise<UnifiedResponse> {
-    const candidates = this.selectProvider(options);
+    const requiredCapabilities: ProviderCapability[] | undefined = options.requiresTools
+      ? ['tool_calling']
+      : undefined;
+    const candidates = this.selectProvider(messages, options, requiredCapabilities);
     const taskType = options.taskType ?? 'unknown';
     this.logRoutingDecision(messages, taskType, candidates);
 
@@ -361,7 +381,7 @@ export class ProviderOrchestrator {
 
       try {
         // Set up the adaptive watchdog
-        const watchdogMs = this.getWatchdogTimeout(slot);
+        const watchdogMs = options.timeoutMs ?? this.getWatchdogTimeout(slot);
         const watchdogController = new AbortController();
         let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
         let lastChunkTime = Date.now();
@@ -404,6 +424,10 @@ export class ProviderOrchestrator {
         // Clear watchdog
         if (watchdogTimer) clearTimeout(watchdogTimer);
 
+        if (response.metadata.incomplete) {
+          throw new Error(`${slot.provider.id} returned incomplete response (watchdog timeout)`);
+        }
+
         // Record success metrics
         const cost = calculateCost(
           response.metadata.modelId,
@@ -443,6 +467,10 @@ export class ProviderOrchestrator {
         this.recordFailure(slot, error);
         retryCount++;
         fallbackTriggered = true;
+
+        if (options.allowFallback === false) {
+          throw error;
+        }
 
         const reason = extractFallbackReason(err);
 
@@ -491,7 +519,10 @@ export class ProviderOrchestrator {
     messages: Message[],
     options: SendOptions,
   ): Promise<UnifiedResponse> {
-    const candidates = this.selectProvider(options);
+    const requiredCapabilities: ProviderCapability[] | undefined = options.requiresTools
+      ? ['tool_calling']
+      : undefined;
+    const candidates = this.selectProvider(messages, options, requiredCapabilities);
     const taskType = options.taskType ?? 'unknown';
     this.logRoutingDecision(messages, taskType, candidates);
 
@@ -508,6 +539,10 @@ export class ProviderOrchestrator {
           () => slot.provider.sendMessage(messages, options),
           options.signal,
         );
+
+        if (response.metadata.incomplete) {
+          throw new Error(`${slot.provider.id} returned incomplete response`);
+        }
 
         const cost = calculateCost(
           response.metadata.modelId,
@@ -536,6 +571,10 @@ export class ProviderOrchestrator {
         this.recordFailure(slot, error);
         retryCount++;
         fallbackTriggered = true;
+
+        if (options.allowFallback === false) {
+          throw error;
+        }
 
         this.telemetry.logFailure({
           timestamp: Date.now(),
