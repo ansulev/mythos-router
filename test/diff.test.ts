@@ -58,6 +58,26 @@ describe('renderDiff', () => {
     // Check for core content while allowing for ANSI escape codes
     assert.match(result, /-.*old/);
     assert.match(result, /\+.*new/);
-    assert.ok(result.includes('|')); // Line numbering column
+    assert.ok(result.includes('│')); // Line numbering column (box-drawing)
+  });
+
+  it('collapses large unchanged blocks', () => {
+    const lines = Array.from({ length: 50 }, (_, i) => `line${i + 1}`);
+    const oldText = lines.join('\n');
+    // Change lines 5 and 45 to create a large unchanged gap between them
+    const modified = [...lines];
+    modified[4] = 'CHANGED-5';
+    modified[44] = 'CHANGED-45';
+    const newText = modified.join('\n');
+    const result = renderDiff(oldText, newText);
+    // Should have a collapse separator for the ~35 unchanged lines in the middle
+    assert.ok(result.includes('unchanged lines'), 'Should show collapsed indicator');
+  });
+
+  it('shows diff stats footer', () => {
+    const result = renderDiff('old\nline', 'new\nline');
+    // Should show +1 and -1 stats
+    assert.ok(result.includes('+1'), 'Should show addition count');
+    assert.ok(result.includes('-1'), 'Should show deletion count');
   });
 });
