@@ -17,9 +17,13 @@ Access to the router's internal logic is gated by token-weighted tiers. This ens
 | **2** | Capybara | 5000000 | Opus 4.7 Extended | Access to Adaptive Effort (Max) and 128k output tokens for massive refactors. |
 | **3** | Mythos (Alpha) |250 00000 | PhD-Level / Cyber | Experimental "Capybara" leak protocols, Zero-Drift enforcement, and priority API routing. |
 
-## 2. Token Utility (SOON)
+## 2. Token Utility (TBA)
 
-MYTHOS-NEXUS TBA
+### Mythos-Nexus
+
+- **Website:** <br>
+- **Docs:**
+- **Tiers:**
 
 ## 3. Supply
 
