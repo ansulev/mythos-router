@@ -15,7 +15,7 @@
 
 <br />
 
-[What is this?](#what-is-this) • [Features](#features) • [Installation](#installation) • [Usage](#usage) • [Architecture](#architecture) • [Token Budget](#token-usage--budget) • [SDK](#-sdk-usage-for-agentic-systems)
+[What is this?](#what-is-this) • [Features](#features) • [Installation](#installation) • [Usage](#usage) • [Architecture](#architecture) • [Token Budget](#token-usage--budget) • [SDK](#-sdk-usage-for-agentic-systems) • [SWD Protocol](#the-swd-protocol)
 
 
 ---
@@ -304,7 +304,7 @@ mythos-router/
 └── AGENTS.md            # Project conventions
 ```
 
-### The SWD Protocol
+## The SWD Protocol
 
 ```
 User Input
