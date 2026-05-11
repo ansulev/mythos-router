@@ -1,9 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createSWDReceipt, saveSWDReceipt } from '../src/receipts.js';
+import type { SWDRunResult } from '../src/swd.js';
 
 describe('CLI Smoke Tests', () => {
   it('builds the project without errors', () => {
@@ -111,4 +114,107 @@ describe('CLI Smoke Tests', () => {
       );
     }
   });
+
+  it('runs receipts list, show, and verify on the built CLI', () => {
+    const repoRoot = process.cwd();
+    const tempDir = mkdtempSync(join(tmpdir(), 'mythos-receipts-cli-'));
+    const cliPath = join(repoRoot, 'dist', 'cli.js');
+    const filePath = 'sample.txt';
+    const absPath = join(tempDir, filePath);
+
+    try {
+      process.chdir(tempDir);
+      writeFileSync(absPath, 'after', 'utf-8');
+
+      const runResult: SWDRunResult = {
+        success: true,
+        rolledBack: false,
+        rollbackErrors: [],
+        errors: [],
+        results: [
+          {
+            action: {
+              path: filePath,
+              operation: 'MODIFY',
+              intent: 'MUTATE',
+              description: 'Update sample file',
+            },
+            status: 'verified',
+            detail: `Verified: MODIFY ${filePath}`,
+            before: {
+              path: absPath,
+              exists: true,
+              size: 'before'.length,
+              mtime: 1,
+              hash: sha256('before'),
+            },
+            after: {
+              path: absPath,
+              exists: true,
+              size: 'after'.length,
+              mtime: 2,
+              hash: sha256('after'),
+            },
+          },
+        ],
+      };
+      const receipt = createSWDReceipt({
+        request: 'change sample',
+        summary: 'MODIFY: sample.txt',
+        result: runResult,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 25,
+        },
+      });
+      saveSWDReceipt(receipt);
+      process.chdir(repoRoot);
+
+      const listed = JSON.parse(execFileSync(
+        process.execPath,
+        [cliPath, 'receipts', '--json'],
+        { cwd: tempDir, encoding: 'utf-8' },
+      ));
+      assert.equal(listed.length, 1);
+      assert.equal(listed[0].id, receipt.id);
+
+      const shown = JSON.parse(execFileSync(
+        process.execPath,
+        [cliPath, 'receipts', 'show', receipt.id, '--json'],
+        { cwd: tempDir, encoding: 'utf-8' },
+      ));
+      assert.equal(shown.id, receipt.id);
+      assert.equal(shown.files[0].path, filePath);
+      assert.equal(shown.files[0].after.path, filePath);
+
+      const verified = JSON.parse(execFileSync(
+        process.execPath,
+        [cliPath, 'receipts', 'verify', receipt.id, '--json'],
+        { cwd: tempDir, encoding: 'utf-8' },
+      ));
+      assert.equal(verified.ok, true);
+      assert.equal(verified.integrityOk, true);
+      assert.equal(verified.files[0].status, 'ok');
+
+      writeFileSync(absPath, 'changed', 'utf-8');
+      const drifted = JSON.parse(execFileSync(
+        process.execPath,
+        [cliPath, 'receipts', 'verify', receipt.id, '--json'],
+        { cwd: tempDir, encoding: 'utf-8' },
+      ));
+      assert.equal(drifted.ok, false);
+      assert.equal(drifted.files[0].status, 'drifted');
+    } catch (err: any) {
+      assert.fail(
+        `receipts CLI smoke failed: ${err.message}\n${err.stdout ?? ''}\n${err.stderr ?? ''}`,
+      );
+    } finally {
+      process.chdir(repoRoot);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
