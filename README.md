@@ -59,6 +59,7 @@ Zero slop. Zero hallucinated state. Full adaptive thinking.
 |  **Deterministic Caching** | SQLite-backed caching for reasoning (SDK only) *(Node 22+)* |
 |  **Adaptive Thinking** | Opus 4.7 with configurable effort levels (high/medium/low) |
 |  **Strict Write Discipline** | Pre/post filesystem snapshots verify every model claim |
+|  **SWD Receipts** | Per-run trust receipts record touched files, hashes, provider, budget, git state, and verification result |
 |  **Self-Healing Memory** | Authority-based logging with a rebuildable SQLite FTS5 search index *(Node 22+)* |
 |  **Auto-Healing TDD** | Pass `--test-cmd` for bounded, error-driven autonomous repair loops |
 |  **Correction Turns** | Model gets 2 retries to match filesystem reality, then yields |
@@ -202,6 +203,17 @@ In dry-run mode, every file operation is previewed before execution:
 In-session commands:
 - `/exit`, `/q` or `quit` — End session (shows final budget summary)
 
+### `mythos receipts` — SWD Trust Receipts
+
+```bash
+mythos receipts              # List recent SWD receipts
+mythos receipts show latest  # Inspect the newest receipt
+mythos receipts verify latest  # Re-check current files against receipt hashes
+mythos receipts --json       # Machine-readable output for tooling
+```
+
+Every non-dry-run SWD file operation writes a local receipt to `.mythos/receipts/`. Receipts include the user request summary, provider/model, token usage, budget snapshot, git branch/commit, per-file before/after hashes, rollback status, and optional `--test-cmd` result. `verify` turns those receipts into a quick drift check for "did the files still match what SWD verified?" Receipts are gitignored by default; force-add only when you want a shared audit trail.
+
 ### `mythos verify` — Codebase ↔ Memory Existence Scan
 
 ```bash
@@ -281,6 +293,7 @@ mythos-router/
 │   ├── budget.ts        # Session budget limiter (token cap, turn cap, progress bar)
 │   ├── swd.ts           # SWD execution kernel (engine, types, parsing, snapshots)
 │   ├── swd-cli.ts       # SWD terminal presentation (verification output, dry-run)
+│   ├── receipts.ts      # SWD trust receipt creation, storage, and verification
 │   ├── memory.ts        # MEMORY.md self-healing manager (SQLite FTS5 index)
 │   ├── metrics.ts       # Global metrics store (persistent budget tracking)
 │   ├── diff.ts          # Myers' diff algorithm (zero-dependency)
@@ -290,6 +303,7 @@ mythos-router/
 │   └── commands/
 │       ├── chat.ts      # Interactive REPL (ChatSession + ChatUI abstraction)
 │       ├── verify.ts    # Codebase ↔ Memory scanner (dry-run aware)
+│       ├── receipts.ts  # SWD receipt list/show/verify command
 │       ├── dream.ts     # Memory compression (dry-run aware)
 │       └── stats.ts     # Budget analytics reporter
 ├── src/providers/       # Multi-Provider Orchestration Engine
