@@ -33,6 +33,19 @@ export interface ChatUI {
   divider(): void;
 }
 
+function getReceiptGitContext(): { branch?: string; commit?: string } | undefined {
+  if (!isGitRepo()) return undefined;
+
+  const branch = getCurrentBranch();
+  const commit = getLatestHash();
+  const git = {
+    ...(branch && branch !== 'unknown' ? { branch } : {}),
+    ...(commit && commit !== 'unknown' ? { commit } : {}),
+  };
+
+  return Object.keys(git).length > 0 ? git : undefined;
+}
+
 // ── Chat Session Manager ─────────────────────────────────────
 class ChatSession {
   public history: Message[] = [];
@@ -364,7 +377,7 @@ class ChatSession {
           sessionTurns: snap.turns,
           estimatedCostUSD: snap.estimatedCostUSD,
         },
-        git: this.currentGitContext(),
+        git: getReceiptGitContext(),
         test: testResult,
       });
       saveSWDReceipt(receipt, false);
@@ -374,19 +387,6 @@ class ChatSession {
     }
   }
 
-  private currentGitContext(): { branch?: string; commit?: string } | undefined {
-    if (!isGitRepo()) return undefined;
-
-    const branch = getCurrentBranch();
-    const commit = getLatestHash();
-    const git: { branch?: string; commit?: string } = {};
-
-    if (branch && branch !== 'unknown') git.branch = branch;
-    if (commit && commit !== 'unknown') git.commit = commit;
-
-    return Object.keys(git).length > 0 ? git : undefined;
-  }
-  
   private appendFileMetadata(result: SWDRunResult): void {
     if (this.options.dryRun || !result.success || result.rolledBack) return;
 
