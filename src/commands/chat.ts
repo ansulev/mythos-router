@@ -1,5 +1,6 @@
 import * as readline from 'node:readline';
 import * as path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { formatTokenUsage, getOrchestrator, type Message } from '../client.js';
 import { SWDEngine, parseActions, summarizeActions, snapshotFile, resolveSafePath, type SWDRunResult, type FileAction } from '../swd.js';
 import { printSWDResults, dryRunSWD, printVerboseParse } from '../swd-cli.js';
@@ -226,10 +227,10 @@ class ChatSession {
     }
   }
 
-  public async processInput(input: string): Promise<void> {
+  public async processInput(input: string): Promise<boolean> {
     if (!this.budget.check().ok) {
       this.ui.warn('Session budget exhausted. Please start a new session or increase limits.');
-      return;
+      return false;
     }
 
     await this.enforceContextWindowGuard();
@@ -274,7 +275,7 @@ class ChatSession {
 
       if (this.options.verbose) printVerboseParse(response.text);
 
-      await this.handleSWD(response.text, input, {
+      const handled = await this.handleSWD(response.text, input, {
         provider: {
           providerId: response.metadata.providerId,
           modelId: response.metadata.modelId,
@@ -307,10 +308,12 @@ class ChatSession {
       if (needsDream()) {
         this.ui.warn(`\n${c.yellow}💤 Memory approaching capacity. Run ${c.cyan}mythos dream${c.yellow} to compress.${c.reset}`);
       }
+      return handled;
     } catch (err: any) {
       this.ui.stopLoading();
       this.ui.error(`API Error: ${err.message}`);
       this.history.pop();
+      return false;
     }
   }
 
@@ -377,12 +380,13 @@ class ChatSession {
     return true;
   }
 
-  private async handleSWD(responseText: string, userInput: string, receiptContext: ReceiptContext): Promise<void> {
+  private async handleSWD(responseText: string, userInput: string, receiptContext: ReceiptContext): Promise<boolean> {
     const actions = parseActions(responseText);
     warnIfMalformedFileActionOutput(responseText, actions.length, this.ui);
     if (actions.length === 0) {
-      appendEntry(`chat: ${userInput.slice(0, 80)}`, '✅ clear', this.options.dryRun);
-      return;
+      const commandLabel = this.options.mode ?? 'chat';
+      appendEntry(`${commandLabel}: ${userInput.slice(0, 80)}`, '✅ clear', this.options.dryRun);
+      return true;
     }
 
     if (this.options.dryRun) {
@@ -392,13 +396,13 @@ class ChatSession {
         `🛠️ dry-run: ${dryResult.accepted.length} accepted, ${dryResult.rejected.length} rejected`,
         true
       );
-      return;
+      return true;
     }
 
     const approvedActions = await this.approveActions(actions, 'SWD security review');
     if (approvedActions.length === 0) {
       appendEntry(summarizeActions(responseText, userInput), '⚠️ blocked by security policy', false);
-      return;
+      return false;
     }
 
     this.ui.startLoading('Verifying and applying changes...');
@@ -432,6 +436,7 @@ class ChatSession {
     }
 
     this.saveReceipt(userInput, summary, finalResult, receiptContext, testResult);
+    return finalResult.success && !finalResult.rolledBack && (!testResult || testResult.passed);
   }
 
   private saveReceipt(
@@ -754,7 +759,12 @@ class ChatSession {
   }
 
 
-  public async finalize(sandboxBranch: string | null) {
+  public async finalize(
+    sandboxBranch: string | null,
+    finalizeOptions: { command?: 'chat' | 'run'; saveSession?: boolean } = {},
+  ) {
+    const command = finalizeOptions.command ?? 'chat';
+    const shouldSaveSession = finalizeOptions.saveSession ?? true;
     let commitHash = 'none';
     const repo = isGitRepo();
     if (repo && !this.options.dryRun) {
@@ -779,7 +789,7 @@ class ChatSession {
     const snap = this.budget.status();
     if (snap.totalTokens > 0) {
       saveSessionMetric({
-        command: 'chat',
+        command,
         project: path.basename(process.cwd()),
         inputTokens: snap.inputTokens,
         outputTokens: snap.outputTokens,
@@ -791,7 +801,7 @@ class ChatSession {
     }
 
     // Persist session for --resume
-    if (this.history.length > 0 && !this.options.dryRun) {
+    if (shouldSaveSession && this.history.length > 0 && !this.options.dryRun) {
       try {
         saveSession(this.history, {
           inputTokens: snap.inputTokens,
@@ -826,6 +836,7 @@ class TerminalUI implements ChatUI {
 
 // ── Command Interface ────────────────────────────────────────
 interface ChatOptions {
+  mode?: 'chat' | 'run';
   effort?: string;
   maxTokens?: string;
   maxTurns?: string;
@@ -837,6 +848,11 @@ interface ChatOptions {
   maxTestRetries?: string;
   skill?: string | string[];
   resume?: boolean;
+}
+
+interface RunOptions extends Omit<ChatOptions, 'mode' | 'resume'> {
+  file?: string;
+  stdin?: boolean;
 }
 
 interface ReceiptContext {
@@ -1023,7 +1039,159 @@ export async function chatCommand(options: ChatOptions): Promise<void> {
   rl.on('close', safeExit);
 }
 
-// ── Local Helpers ────────────────────────────────────────────
+// -- Run command and local helpers -----------------------------
+export async function runCommand(prompt: string, options: RunOptions): Promise<void> {
+  let input: string;
+  try {
+    input = await resolveRunPrompt(prompt, options);
+  } catch (err: any) {
+    logError(err.message);
+    process.exitCode = 1;
+    return;
+  }
+
+  validateApiKey();
+  const runOptions = normalizeRunOptions(options);
+  const ui = new TerminalUI(new Spinner());
+  const session = new ChatSession(runOptions, ui);
+
+  let sandboxBranch: string | null = null;
+  try {
+    sandboxBranch = await session.setupSandbox();
+    await session.initialize();
+  } catch (err: any) {
+    ui.error(err.message);
+    process.exitCode = 1;
+    return;
+  }
+
+  const repo = isGitRepo();
+  const snap = session.budget.status();
+  const cardConfig: SessionCardConfig = {
+    provider: session.forceProvider ?? 'auto',
+    model: MODELS[runOptions.effort ?? 'high'] || MODELS.high,
+    dryRun: runOptions.dryRun === true,
+    budgetEnabled: runOptions.budget !== false,
+    branch: sandboxBranch || (repo ? getCurrentBranch() : 'none'),
+    memoryEntries: getEntryCount(),
+    memoryActive: getEntryCount() > 0,
+    tokensUsed: snap.totalTokens,
+    maxTokens: snap.maxTokens,
+    turnsUsed: snap.turns,
+    maxTurns: snap.maxTurns,
+  };
+  ui.log(renderSessionCard(cardConfig));
+
+  const badges = renderBadgeRow({
+    dryRun: runOptions.dryRun,
+    verbose: runOptions.verbose,
+    branch: sandboxBranch || undefined,
+    noBudget: runOptions.budget === false,
+  });
+  if (badges) ui.log(badges);
+  ui.divider();
+
+  const startMemoryEntries = getEntryCount();
+  const startTime = Date.now();
+  let ok = false;
+  let finalized = false;
+
+  try {
+    ok = await session.processInput(input);
+  } finally {
+    try {
+      await session.finalize(sandboxBranch, { command: 'run', saveSession: false });
+      finalized = true;
+    } catch (err: any) {
+      logWarn(`Finalize failed: ${err.message}`);
+    }
+  }
+
+  const finalSnap = session.budget.status();
+  if (finalSnap.totalTokens > 0) {
+    const status = ok && finalized ? `${c.green}Run complete${c.reset}` : `${c.yellow}Run finished with issues${c.reset}`;
+    ui.log(`\n${status}`);
+    ui.log(
+      `${c.dim}Duration: ${formatElapsedMs(Date.now() - startTime)} | ` +
+      `Turns: ${finalSnap.turns}/${finalSnap.maxTurns} | ` +
+      `Tokens: ${finalSnap.totalTokens.toLocaleString()}/${finalSnap.maxTokens.toLocaleString()} | ` +
+      `Cost: ~$${finalSnap.estimatedCostUSD.toFixed(4)} | ` +
+      `Memory entries: +${Math.max(0, getEntryCount() - startMemoryEntries)}${c.reset}`,
+    );
+  }
+
+  process.exitCode = ok && finalized ? 0 : 1;
+}
+
+async function resolveRunPrompt(prompt: string, options: RunOptions): Promise<string> {
+  const inlinePrompt = prompt.trim();
+  const hasInlinePrompt = inlinePrompt.length > 0;
+  const hasFilePrompt = typeof options.file === 'string' && options.file.trim().length > 0;
+  const hasStdinPrompt = options.stdin === true;
+  const sourceCount = [hasInlinePrompt, hasFilePrompt, hasStdinPrompt].filter(Boolean).length;
+
+  if (sourceCount === 0) {
+    throw new Error('Provide a prompt, --file <path>, or --stdin.');
+  }
+
+  if (sourceCount > 1) {
+    throw new Error('Use only one prompt source: inline prompt, --file, or --stdin.');
+  }
+
+  if (hasFilePrompt) {
+    const filePath = options.file!.trim();
+    try {
+      return normalizePromptContent(readFileSync(resolveSafePath(filePath), 'utf-8'), `prompt file ${filePath}`);
+    } catch (err: any) {
+      throw new Error(`Unable to read prompt file ${filePath}: ${err.message}`);
+    }
+  }
+
+  if (hasStdinPrompt) {
+    if (process.stdin.isTTY) {
+      throw new Error('--stdin requires piped input.');
+    }
+    return normalizePromptContent(await readStdin(), 'stdin');
+  }
+
+  return inlinePrompt;
+}
+
+function normalizePromptContent(content: string, source: string): string {
+  const input = content.trim();
+  if (!input) {
+    throw new Error(`Run prompt from ${source} cannot be empty.`);
+  }
+  return input;
+}
+
+async function readStdin(): Promise<string> {
+  process.stdin.setEncoding('utf-8');
+  let input = '';
+  for await (const chunk of process.stdin) {
+    input += String(chunk);
+  }
+  return input;
+}
+
+function normalizeRunOptions(options: RunOptions): ChatOptions {
+  const maxTestRetries = parsePositiveInt(options.maxTestRetries, 3);
+  const defaultMaxTurns = 1 + MAX_CORRECTION_RETRIES + (options.testCmd ? maxTestRetries : 0);
+
+  return {
+    ...options,
+    mode: 'run',
+    resume: false,
+    maxTurns: options.maxTurns ?? String(defaultMaxTurns),
+    maxTestRetries: String(maxTestRetries),
+  };
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function formatElapsedMs(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;

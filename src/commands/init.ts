@@ -113,7 +113,7 @@ function checkProviders(): ProviderCheck[] {
 // ── Scaffold Files ───────────────────────────────────────────
 interface ScaffoldResult {
   file: string;
-  action: 'created' | 'exists' | 'skipped';
+  action: 'created' | 'exists' | 'skipped' | 'missing';
 }
 
 function scaffoldIgnoreFile(force: boolean): ScaffoldResult {
@@ -151,6 +151,23 @@ function scaffoldSkillsDir(): ScaffoldResult {
   return { file: '~/.mythos-router/skills/', action: existed ? 'exists' : 'created' };
 }
 
+function inspectScaffoldState(): ScaffoldResult[] {
+  return [
+    {
+      file: MYTHOSIGNORE_FILE,
+      action: existsSync(resolve(process.cwd(), MYTHOSIGNORE_FILE)) ? 'exists' : 'missing',
+    },
+    {
+      file: 'MEMORY.md',
+      action: existsSync(getMemoryPath()) ? 'exists' : 'missing',
+    },
+    {
+      file: '~/.mythos-router/skills/',
+      action: existsSync(getSkillsDir()) ? 'exists' : 'missing',
+    },
+  ];
+}
+
 // ── Format Helpers ───────────────────────────────────────────
 function badge(ok: boolean): string {
   return ok ? `${c.green}✔${c.reset}` : `${c.red}✗${c.reset}`;
@@ -163,13 +180,15 @@ function dimBadge(ok: boolean): string {
 // ── Command Interface ────────────────────────────────────────
 interface InitOptions {
   force?: boolean;
+  check?: boolean;
 }
 
 export async function initCommand(options: InitOptions): Promise<void> {
   const force = options.force ?? false;
+  const checkOnly = options.check ?? false;
 
   console.log(BANNER);
-  console.log(heading('PROJECT INITIALIZATION'));
+  console.log(heading(checkOnly ? 'PROJECT CHECK' : 'PROJECT INITIALIZATION'));
   console.log();
 
   // ── 1. Environment Validation ──────────────────────────────
@@ -189,6 +208,10 @@ export async function initCommand(options: InitOptions): Promise<void> {
   if (envFatal) {
     logError(`\nNode.js >= ${MIN_NODE_MAJOR} is required. Aborting.`);
     process.exit(1);
+  }
+
+  if (checkOnly && force) {
+    warn(`--force is ignored in read-only check mode.`);
   }
 
   console.log();
@@ -216,12 +239,14 @@ export async function initCommand(options: InitOptions): Promise<void> {
   console.log();
 
   // ── 3. Scaffold Project Files ──────────────────────────────
-  console.log(`${c.cyan}${c.bold}  Scaffolding${c.reset}`);
-  const results: ScaffoldResult[] = [];
-
-  results.push(scaffoldIgnoreFile(force));
-  results.push(scaffoldMemory(force));
-  results.push(scaffoldSkillsDir());
+  console.log(`${c.cyan}${c.bold}  ${checkOnly ? 'Project files' : 'Scaffolding'}${c.reset}`);
+  const results: ScaffoldResult[] = checkOnly
+    ? inspectScaffoldState()
+    : [
+      scaffoldIgnoreFile(force),
+      scaffoldMemory(force),
+      scaffoldSkillsDir(),
+    ];
 
   for (const r of results) {
     const icon = r.action === 'created'
@@ -234,7 +259,9 @@ export async function initCommand(options: InitOptions): Promise<void> {
       : r.action === 'exists'
         ? `${c.dim}already exists${c.reset}`
         : `${c.yellow}skipped${c.reset}`;
-    console.log(`  ${icon} ${c.bold}${r.file}${c.reset}  ${label}`);
+    const displayIcon = r.action === 'missing' ? `${c.yellow}!${c.reset}` : icon;
+    const displayLabel = r.action === 'missing' ? `${c.yellow}missing${c.reset}` : label;
+    console.log(`  ${displayIcon} ${c.bold}${r.file}${c.reset}  ${displayLabel}`);
   }
 
   // Show existing skills if any
@@ -248,23 +275,36 @@ export async function initCommand(options: InitOptions): Promise<void> {
   // ── 4. Result ──────────────────────────────────────────────
   const created = results.filter(r => r.action === 'created').length;
   const existed = results.filter(r => r.action === 'exists').length;
+  const missing = results.filter(r => r.action === 'missing').length;
 
   console.log(`${c.cyan}${c.bold}  Result${c.reset}`);
 
-  if (created > 0) {
+  if (checkOnly) {
+    if (missing > 0) {
+      console.log(`  ${c.yellow}!${c.reset} ${missing} project file(s) missing. Run ${c.cyan}mythos init${c.reset} to scaffold them.`);
+    } else {
+      console.log(`  ${c.green}✔${c.reset} Project scaffolding is present`);
+    }
+  } else if (created > 0) {
     console.log(`  ${c.green}✔${c.reset} Initialized in ${c.bold}${process.cwd()}${c.reset}`);
   } else if (existed === results.length) {
     console.log(`  ${c.green}✔${c.reset} Already initialized${force ? '' : ` ${c.dim}(use ${c.cyan}--force${c.dim} to re-scaffold)${c.reset}`}`);
   }
 
   // Status line
-  const statusLabel = !anthropicMissing ? `${c.green}ready${c.reset}` : `${c.yellow}ready (ANTHROPIC_API_KEY not set)${c.reset}`;
+  const statusLabel = checkOnly && missing > 0
+    ? `${c.yellow}setup incomplete${c.reset}`
+    : !anthropicMissing ? `${c.green}ready${c.reset}` : `${c.yellow}ready (ANTHROPIC_API_KEY not set)${c.reset}`;
   console.log(`  ${c.dim}Status:${c.reset} ${statusLabel}`);
 
   console.log();
 
   // ── 5. Next Steps ──────────────────────────────────────────
   console.log(`${c.cyan}${c.bold}  Next steps${c.reset}`);
+  if (checkOnly && missing > 0) {
+    console.log(`  ${c.dim}$${c.reset} ${c.bold}mythos init${c.reset}           ${c.dim}Create missing project files${c.reset}`);
+  }
+  console.log(`  ${c.dim}$${c.reset} ${c.bold}mythos run "..."${c.reset}      ${c.dim}Run one prompt and exit${c.reset}`);
   console.log(`  ${c.dim}$${c.reset} ${c.bold}mythos chat${c.reset}           ${c.dim}Start an interactive session${c.reset}`);
   console.log(`  ${c.dim}$${c.reset} ${c.bold}mythos chat --dry-run${c.reset}  ${c.dim}Preview changes without applying${c.reset}`);
   console.log(`  ${c.dim}$${c.reset} ${c.bold}mythos verify${c.reset}         ${c.dim}Scan codebase for memory drift${c.reset}`);

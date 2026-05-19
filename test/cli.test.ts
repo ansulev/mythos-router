@@ -28,10 +28,64 @@ describe('CLI Smoke Tests', () => {
 
       assert.ok(output.includes('Usage: mythos [options] [command]'));
       assert.ok(output.includes('chat [options]'));
+      assert.ok(output.includes('run [options]'));
+      assert.ok(output.includes('init [options]'));
     } catch (err: any) {
       assert.fail(
         `node dist/cli.js --help failed: ${err.message}\n${err.stdout ?? ''}\n${err.stderr ?? ''}`,
       );
+    }
+  });
+
+  it('lists one-shot prompt source options in run help', () => {
+    try {
+      const output = execFileSync(process.execPath, ['dist/cli.js', 'run', '--help'], {
+        encoding: 'utf-8',
+      });
+
+      assert.ok(output.includes('[prompt...]'));
+      assert.ok(output.includes('--file <path>'));
+      assert.ok(output.includes('--stdin'));
+    } catch (err: any) {
+      assert.fail(
+        `node dist/cli.js run --help failed: ${err.message}\n${err.stdout ?? ''}\n${err.stderr ?? ''}`,
+      );
+    }
+  });
+
+  it('runs init --check in a temporary directory without creating project files', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'mythos-init-check-'));
+    const cliPath = join(process.cwd(), 'dist', 'cli.js');
+
+    try {
+      const output = execFileSync(
+        process.execPath,
+        [cliPath, 'init', '--check'],
+        {
+          cwd: tempDir,
+          encoding: 'utf-8',
+        },
+      );
+
+      assert.ok(output.includes('PROJECT CHECK'));
+
+      assert.equal(
+        existsSync(join(tempDir, '.mythosignore')),
+        false,
+        'init --check should not create .mythosignore',
+      );
+
+      assert.equal(
+        existsSync(join(tempDir, 'MEMORY.md')),
+        false,
+        'init --check should not create MEMORY.md',
+      );
+    } catch (err: any) {
+      assert.fail(
+        `init --check failed: ${err.message}\n${err.stdout ?? ''}\n${err.stderr ?? ''}`,
+      );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 

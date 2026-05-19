@@ -19,7 +19,7 @@
 - `src/git.ts` — Git operations (branching, committing, status)
 - `src/utils.ts` — Terminal colors, spinner, formatting, badges, confirm prompt
 - `src/index.ts` — Public SDK exports (SWDEngine, parseActions, etc.)
-- `src/commands/chat.ts` — Interactive REPL (ChatSession orchestrator + ChatUI abstraction)
+- `src/commands/chat.ts` — Interactive REPL and one-shot run orchestration (ChatSession + ChatUI abstraction)
 - `src/commands/init.ts` — Project initialization (environment checks, provider detection, scaffolding)
 - `src/commands/verify.ts` — Codebase ↔ Memory drift scanner (dry-run aware)
 - `src/commands/receipts.ts` — SWD receipt list/show/verify command
@@ -58,6 +58,9 @@ npx tsx src/cli.ts chat
 npx tsx src/cli.ts chat --dry-run --verbose
 npx tsx src/cli.ts chat --max-tokens 100000 --max-turns 10
 npx tsx src/cli.ts chat --no-budget
+npx tsx src/cli.ts run "explain this repo architecture"
+npx tsx src/cli.ts run --file TASK.md
+npx tsx src/cli.ts run "fix the failing smoke test" --dry-run
 npx tsx src/cli.ts verify
 npx tsx src/cli.ts verify --dry-run
 npx tsx src/cli.ts dream
@@ -67,6 +70,7 @@ npx tsx src/cli.ts stats --days 7
 npx tsx src/cli.ts receipts
 npx tsx src/cli.ts receipts verify latest
 npx tsx src/cli.ts init
+npx tsx src/cli.ts init --check
 npx tsx src/cli.ts init --force
 
 # Or via npm scripts

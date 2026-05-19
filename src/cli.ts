@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
-import { chatCommand } from './commands/chat.js';
+import { chatCommand, runCommand } from './commands/chat.js';
 
 // ── Suppress Node.js experimental warnings (SQLite) ─────────
 // These leak into terminal output and break polished CLI feel.
@@ -117,6 +117,64 @@ program
   )
   .action(chatCommand);
 
+// mythos run
+program
+  .command('run')
+  .description('Run one prompt through Mythos and exit after SWD verification')
+  .argument('[prompt...]', 'Prompt to run once')
+  .option(
+    '--file <path>',
+    'Read the one-shot prompt from a local file',
+  )
+  .option(
+    '--stdin',
+    'Read the one-shot prompt from piped standard input',
+  )
+  .option(
+    '-e, --effort <level>',
+    'Thinking effort: high (default), medium, low',
+    'high',
+  )
+  .option(
+    '--max-tokens <n>',
+    `Max tokens for this run (default: ${DEFAULT_MAX_TOKENS_PER_SESSION.toLocaleString()})`,
+    String(DEFAULT_MAX_TOKENS_PER_SESSION),
+  )
+  .option(
+    '--max-turns <n>',
+    'Max model turns for this run (default: one prompt plus bounded repair turns)',
+  )
+  .option(
+    '--no-budget',
+    'Disable budget limits (expert mode - use at your own risk)',
+  )
+  .option(
+    '--dry-run',
+    'Preview all file operations without executing them',
+  )
+  .option(
+    '--verbose',
+    'Show detailed SWD traces and memory operations',
+  )
+  .option(
+    '-b, --branch <name>',
+    'Run in a new git branch for sandboxed reasoning',
+  )
+  .option(
+    '-t, --test-cmd <cmd>',
+    'Command to run after successful SWD execution (prompts before running if model changed command-affecting files)',
+  )
+  .option(
+    '--max-test-retries <n>',
+    'Maximum number of times Claude can attempt to fix failing tests',
+    '3',
+  )
+  .option(
+    '-s, --skill <names...>',
+    'Inject specific expert skills (e.g., -s mcp -s react)',
+  )
+  .action((prompt: string[] | undefined, options: Parameters<typeof runCommand>[1]) => runCommand((prompt ?? []).join(' '), options));
+
 // ── mythos verify ────────────────────────────────────────────
 program
   .command('verify')
@@ -184,6 +242,7 @@ program
   .command('init')
   .description('Initialize mythos-router in the current project')
   .option('-f, --force', 'Re-scaffold files even if they already exist')
+  .option('--check', 'Run environment and project setup checks without writing files')
   .action(initCommand);
 
 // ── Default: show help ───────────────────────────────────────
