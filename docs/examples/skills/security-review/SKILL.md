@@ -15,11 +15,15 @@ incompatible-with:
 Use this skill when a task touches command execution, package scripts, CI, deploy files, authentication, secrets, receipts, memory, or user-controlled paths.
 
 ## Read First
+
+If present, review these before making security-sensitive edits:
+
 - SECURITY.md
 - package.json
 - .github/workflows/
 - src/security-policy.ts
 - src/commands/verify.ts
+- any file that defines command execution, receipts, secrets, auth, or writable paths
 
 ## Rules
 - Treat install scripts, lifecycle hooks, shell commands, workflows, Docker files, and deploy files as high-risk surfaces.
@@ -32,3 +36,12 @@ Use this skill when a task touches command execution, package scripts, CI, deplo
 - Check that sensitive outputs are redacted before storage.
 - Check that command-affecting changes still require explicit human confirmation.
 - Prefer read-only verification for CI-facing checks.
+
+## Output
+
+When finished, summarize:
+
+- what security-sensitive files changed
+- what risks were checked
+- what verification was run
+- any remaining assumptions or unverified areas
